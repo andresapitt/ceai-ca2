@@ -72,7 +72,7 @@ const functionDeclarations: FunctionDeclaration[] = [
         location: {
           type: Type.STRING,
           description:
-            "Place name to get weather for, e.g. 'Fanore, Co. Clare' or 'Westport'.",
+            "Bare town/village name only, e.g. 'Fanore' or 'Westport' — do not include county or 'Co.' prefixes.",
         },
       },
       required: ["location"],
@@ -113,16 +113,31 @@ async function getTourCatalog() {
   return { fetched_at: new Date().toISOString(), tour_count: tours.length, tours };
 }
 
-async function getWeatherForecast(location: string) {
+async function geocode(name: string) {
   const geoUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(
-    location
+    name
   )}&count=1&country=IE`;
   const geoRes = await fetch(geoUrl, { cache: "no-store" });
-  if (!geoRes.ok) {
-    return { error: `Geocoding failed for "${location}".` };
-  }
+  if (!geoRes.ok) return null;
   const geoData = await geoRes.json();
-  const place = geoData.results?.[0];
+  return geoData.results?.[0] ?? null;
+}
+
+async function getWeatherForecast(location: string) {
+  // Geocoding wants a bare place name, not "Place, Co. County" — try
+  // progressively simpler variants of what the model passed in.
+  const candidates = [
+    location,
+    location.split(",")[0].trim(),
+    location.replace(/\bco\.?\s+/i, "").split(",")[0].trim(),
+  ].filter((v, i, arr) => v && arr.indexOf(v) === i);
+
+  let place = null;
+  for (const candidate of candidates) {
+    place = await geocode(candidate);
+    if (place) break;
+  }
+
   if (!place) {
     return { error: `Could not find a location matching "${location}" in Ireland.` };
   }
