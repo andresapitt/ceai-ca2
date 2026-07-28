@@ -162,6 +162,42 @@ async function getWeatherForecast(location: string) {
   };
 }
 
+// Google periodically retires/renames free-tier model ids and rate-limits are
+// per-model, so probe a shortlist and stick with whichever one actually works
+// for this key, rather than hardcoding a single name that can break later.
+const MODEL_CANDIDATES = [
+  "gemini-flash-latest",
+  "gemini-2.5-flash",
+  "gemini-2.0-flash",
+  "gemini-flash-lite-latest",
+  "gemini-2.5-flash-lite",
+  "gemini-2.0-flash-lite",
+];
+let cachedWorkingModel: string | null = null;
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function generateContentWithFallback(ai: GoogleGenAI, params: any) {
+  const candidates = cachedWorkingModel
+    ? [cachedWorkingModel, ...MODEL_CANDIDATES.filter((m) => m !== cachedWorkingModel)]
+    : MODEL_CANDIDATES;
+
+  let lastErr: unknown;
+  for (const model of candidates) {
+    try {
+      const response = await ai.models.generateContent({ ...params, model });
+      cachedWorkingModel = model;
+      return response;
+    } catch (err) {
+      lastErr = err;
+      const status = (err as { status?: number })?.status;
+      const isRetryable = status === 404 || status === 429;
+      if (!isRetryable) throw err;
+      console.warn(`Model "${model}" unavailable (status ${status}), trying next candidate.`);
+    }
+  }
+  throw lastErr;
+}
+
 async function executeFunctionCall(name: string, args: Record<string, unknown>) {
   switch (name) {
     case "get_tour_catalog":
@@ -212,8 +248,7 @@ export async function POST(req: NextRequest) {
 
   try {
     for (let turn = 0; turn < 5; turn++) {
-      const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash-lite",
+      const response = await generateContentWithFallback(ai, {
         contents,
         config: {
           systemInstruction: SYSTEM_INSTRUCTION,
