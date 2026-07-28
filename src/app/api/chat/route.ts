@@ -261,10 +261,16 @@ export async function POST(req: NextRequest) {
 
       const functionCalls = response.functionCalls;
       if (functionCalls && functionCalls.length > 0) {
-        contents.push({
-          role: "model",
-          parts: functionCalls.map((fc) => ({ functionCall: fc })),
-        });
+        // Push the raw model content (not a reconstructed one) so fields
+        // like thoughtSignature — required by some models to keep a
+        // function-calling turn coherent — survive into the next request.
+        const modelContent = response.candidates?.[0]?.content;
+        contents.push(
+          modelContent ?? {
+            role: "model",
+            parts: functionCalls.map((fc) => ({ functionCall: fc })),
+          }
+        );
 
         const responseParts = await Promise.all(
           functionCalls.map(async (fc) => {
