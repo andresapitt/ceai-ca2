@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Atlantic Coast Tours — Customer Assistant</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f7f6f3;
+    --panel: #ffffff;
+    --border: rgba(0,0,0,.1);
+    --text: #14140f;
+    --muted: #6b6b63;
+    --accent: #0f6b5c;
+    --accent-text: #ffffff;
+    --bubble-user: #14140f;
+    --bubble-user-text: #ffffff;
+    --bubble-model: #eef0ea;
+    --bubble-model-text: #14140f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14140f;
+      --panel: #1c1c16;
+      --border: rgba(255,255,255,.12);
+      --text: #f2f1ea;
+      --muted: #a3a294;
+      --accent: #2fae94;
+      --accent-text: #05130f;
+      --bubble-user: #f2f1ea;
+      --bubble-user-text: #14140f;
+      --bubble-model: #262619;
+      --bubble-model-text: #f2f1ea;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    display: flex;
+    justify-content: center;
+    min-height: 100vh;
+  }
+  main {
+    width: 100%;
+    max-width: 640px;
+    padding: 24px 16px 32px;
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+  }
+  header h1 {
+    font-size: 1.4rem;
+    margin: 0 0 4px;
+  }
+  header p.sub {
+    margin: 0 0 12px;
+    color: var(--muted);
+    font-size: .9rem;
+  }
+  .disclosure {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px 14px;
+    font-size: .8rem;
+    color: var(--muted);
+    margin-bottom: 16px;
+  }
+  #chat {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    overflow-y: auto;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 16px;
+    min-height: 400px;
+  }
+  .empty {
+    color: var(--muted);
+    font-size: .9rem;
+  }
+  .msg {
+    max-width: 82%;
+    padding: 10px 14px;
+    border-radius: 16px;
+    font-size: .92rem;
+    line-height: 1.4;
+    white-space: pre-wrap;
+  }
+  .msg.user {
+    align-self: flex-end;
+    background: var(--bubble-user);
+    color: var(--bubble-user-text);
+  }
+  .msg.model {
+    align-self: flex-start;
+    background: var(--bubble-model);
+    color: var(--bubble-model-text);
+  }
+  .tools {
+    align-self: flex-start;
+    font-size: .72rem;
+    color: var(--accent);
+    margin-top: -4px;
+  }
+  .composer {
+    display: flex;
+    gap: 8px;
+    margin-top: 14px;
+  }
+  textarea {
+    flex: 1;
+    resize: none;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--panel);
+    color: var(--text);
+    padding: 10px 12px;
+    font-size: .92rem;
+    font-family: inherit;
+  }
+  button {
+    border: none;
+    border-radius: 10px;
+    padding: 0 18px;
+    background: var(--accent);
+    color: var(--accent-text);
+    font-weight: 600;
+    font-size: .92rem;
+    cursor: pointer;
+  }
+  button:disabled {
+    opacity: .4;
+    cursor: default;
+  }
+  .error {
+    color: #c0392b;
+    font-size: .85rem;
+    margin-top: 6px;
+  }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Atlantic Coast Tours — Customer Assistant</h1>
+    <p class="sub">Ask about our tours, prices, availability, or weather conditions.</p>
+  </header>
+
+  <div class="disclosure">
+    You are chatting with an AI assistant (a large language model), not a human. It looks up live tour and weather data to answer your questions, but responses are AI-generated and should be verified for anything you plan to rely on when booking.
+  </div>
+
+  <div id="chat">
+    <p class="empty">Ask a question to get started — e.g. "What tours do you have in Clare?" or "Is the Fanore surf lesson still available this week?"</p>
+  </div>
+
+  <div class="composer">
+    <textarea id="input" rows="2" placeholder="Type your message..."></textarea>
+    <button id="send">Send</button>
+  </div>
+  <div id="error" class="error"></div>
+</main>
+
+<script>
+  const API_URL = "https://ceai-ca2.vercel.app/api/chat";
+
+  const chatEl = document.getElementById("chat");
+  const inputEl = document.getElementById("input");
+  const sendEl = document.getElementById("send");
+  const errorEl = document.getElementById("error");
+
+  let messages = [];
+  let loading = false;
+
+  function render() {
+    chatEl.innerHTML = "";
+    if (messages.length === 0) {
+      const p = document.createElement("p");
+      p.className = "empty";
+      p.textContent = 'Ask a question to get started — e.g. "What tours do you have in Clare?" or "Is the Fanore surf lesson still available this week?"';
+      chatEl.appendChild(p);
+    }
+    for (const m of messages) {
+      const div = document.createElement("div");
+      div.className = "msg " + m.role;
+      div.textContent = m.text;
+      chatEl.appendChild(div);
+      if (m.toolsUsed && m.toolsUsed.length) {
+        const t = document.createElement("div");
+        t.className = "tools";
+        t.textContent = "🔧 live tool call: " + m.toolsUsed.join(", ");
+        chatEl.appendChild(t);
+      }
+    }
+    if (loading) {
+      const div = document.createElement("div");
+      div.className = "msg model";
+      div.textContent = "Thinking...";
+      chatEl.appendChild(div);
+    }
+    chatEl.scrollTop = chatEl.scrollHeight;
+  }
+
+  async function send() {
+    const text = inputEl.value.trim();
+    if (!text || loading) return;
+
+    messages.push({ role: "user", text });
+    inputEl.value = "";
+    loading = true;
+    errorEl.textContent = "";
+    render();
+
+    try {
+      const res = await fetch(API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messages }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Something went wrong.");
+      messages.push({ role: "model", text: data.text, toolsUsed: data.toolsUsed });
+    } catch (err) {
+      errorEl.textContent = err.message || "Something went wrong.";
+    } finally {
+      loading = false;
+      render();
+    }
+  }
+
+  sendEl.addEventListener("click", send);
+  inputEl.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      send();
+    }
+  });
+
+  render();
+</script>
+</body>
+</html>
