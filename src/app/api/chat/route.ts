@@ -213,7 +213,7 @@ export async function POST(req: NextRequest) {
   try {
     for (let turn = 0; turn < 5; turn++) {
       const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
+        model: "gemini-2.5-flash-lite",
         contents,
         config: {
           systemInstruction: SYSTEM_INSTRUCTION,
