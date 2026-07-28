@@ -17,9 +17,11 @@ const SHEET_ID = "1balBGf8QhZ5dc-RCCAPt2kcrcf6m_YRh0HL_r8bBtJw";
 
 const ALLOWED_ORIGINS = new Set(
   [
-    process.env.ALLOWED_ORIGIN,
+    ...(process.env.ALLOWED_ORIGIN?.split(",").map((o) => o.trim()) ?? []),
     "http://localhost:3000",
     "http://127.0.0.1:3000",
+    "http://localhost:5500",
+    "http://127.0.0.1:5500",
   ].filter(Boolean)
 );
 
