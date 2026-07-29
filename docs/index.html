@@ -875,6 +875,7 @@
       p.textContent = 'Ask a question to get started — e.g. "What tours do you have in Clare?" or "Is the Fanore surf lesson still available this week?"';
       chatEl.appendChild(p);
     }
+    const shownTourIds = new Set();
     for (const m of messages) {
       const div = document.createElement("div");
       div.className = "msg " + m.role;
@@ -884,10 +885,17 @@
         chatEl.appendChild(buildWeatherCard(m.weather));
       }
       if (m.tours && m.tours.length) {
-        const wrap = document.createElement("div");
-        wrap.className = "tour-cards";
-        m.tours.forEach((t) => wrap.appendChild(buildTourCard(t)));
-        chatEl.appendChild(wrap);
+        // Only show each tour's card once per conversation, at its first
+        // mention — the model may re-reference an already-shown tour later
+        // (e.g. during booking confirmation) without needing the card again.
+        const freshTours = m.tours.filter((t) => !shownTourIds.has(t.tour_id));
+        freshTours.forEach((t) => shownTourIds.add(t.tour_id));
+        if (freshTours.length) {
+          const wrap = document.createElement("div");
+          wrap.className = "tour-cards";
+          freshTours.forEach((t) => wrap.appendChild(buildTourCard(t)));
+          chatEl.appendChild(wrap);
+        }
       }
     }
     if (loading) {
