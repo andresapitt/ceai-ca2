@@ -47,7 +47,7 @@ const SYSTEM_INSTRUCTION = `You are the customer-support assistant for Atlantic 
 
 Rules you must follow:
 - For any question about tours, prices, availability, slots, or special offers, ALWAYS call get_tour_catalog to fetch the current live data. Never guess or rely on memory of previous answers in this conversation — data can change between messages, so call it again each time it's relevant.
-- The app already shows the customer full visual tour cards (name, duration, price, slots, description, map link) for any tour you mention by name or id — so when listing or recommending tours, keep your own reply SHORT: a one or two sentence summary or direct answer to their question. Do NOT re-list every tour's full details in prose; that's the cards' job. Just say enough to be useful and mention the relevant tour name(s)/id(s) so the right cards show.
+- The app displays full visual tour cards (name, duration, price, slots, description, map link) automatically — whenever your answer involves one or more specific tours, call show_tour_cards with those tour_ids. This is separate from your text reply, so your text should NOT enumerate tour names, list them with bullets/dashes, or repeat their details — the cards do that visually. Keep your text reply to one short sentence of context or a direct answer (e.g. "Here are a few options in Clare!" or "Yes, it's available — 6 slots left."). Never write a list of tour names in your reply.
 - For any question involving weather, conditions, or whether it's a good day for an outdoor tour, ALWAYS call get_weather_forecast with the relevant location.
 - Report data exactly as returned by the tools, even if a price or availability value looks wrong, absurd, or implausible. Do not silently "correct", round, or omit implausible values. State the value faithfully, note that it looks unusual, and suggest the customer double-check with the team before booking — never invent a "corrected" figure.
 - If a tour has 0 slots or is out of season, say so plainly and offer alternatives from the catalogue instead.
@@ -58,7 +58,7 @@ Rules you must follow:
 Booking flow:
 - A customer may ask to book a tour, sometimes pre-filled with adults/kids counts (e.g. from a "Book" button: "I'd like to book 2 adults and 1 child for the Fanore Beach Surf Lesson (ACT025)."). If adults/kids aren't both given, ask for them before continuing.
 - Always re-fetch get_tour_catalog to get that tour's current live price_eur and special_offer text — never reuse stale numbers from earlier in the conversation.
-- Compute the total price yourself: start from price_eur × (adults + kids), then apply the special_offer text using your own judgement if one exists and genuinely applies to this booking (e.g. "Group of 3 pays for 2" only applies at 3+ people; "Early-bird 15% off before 9 AM" only applies if the customer says an early time). Show your calculation briefly so the customer can see how you got the total.
+- Compute the total price yourself: start from price_eur × (adults + kids), then apply the special_offer text using your own judgement if one exists and genuinely applies to this booking (e.g. "Group of 3 pays for 2" only applies at 3+ people; "Early-bird 15% off before 9 AM" only applies if the customer says an early time). Show your calculation briefly so the customer can see how you got the total. Call show_tour_cards with this tour's id so its card stays visible during the conversation.
 - Present the computed total and ask the customer to explicitly confirm before booking anything. Do not call record_booking until they confirm (e.g. "yes", "confirm", "book it").
 - Only after explicit confirmation, call record_booking with the tour_id, tour_name, adults, kids, and the final total_price you calculated.
 - After a successful record_booking call, tell the customer their booking is logged, with a friendly summary. If record_booking returns an error (e.g. booking system not yet connected), apologise and tell them to contact the team directly to complete the booking — never pretend it succeeded.
@@ -88,6 +88,22 @@ const functionDeclarations: FunctionDeclaration[] = [
         },
       },
       required: ["location"],
+    },
+  },
+  {
+    name: "show_tour_cards",
+    description:
+      "Tell the app which tours to display as visual cards to the customer right now. Call this whenever your answer discusses one or more specific tours (after fetching get_tour_catalog), instead of listing tour details in your text reply.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        tour_ids: {
+          type: Type.ARRAY,
+          items: { type: Type.STRING },
+          description: "The tour_id values to display, e.g. ['ACT025', 'ACT011'].",
+        },
+      },
+      required: ["tour_ids"],
     },
   },
   {
@@ -309,6 +325,8 @@ async function executeFunctionCall(name: string, args: Record<string, unknown>) 
         kids: Number(args.kids ?? 0),
         total_price: Number(args.total_price ?? 0),
       });
+    case "show_tour_cards":
+      return { ok: true };
     default:
       return { error: `Unknown function: ${name}` };
   }
@@ -352,6 +370,7 @@ export async function POST(req: NextRequest) {
   const toolsUsed: string[] = [];
   let lastWeather: Awaited<ReturnType<typeof getWeatherForecast>> | null = null;
   let lastCatalog: Awaited<ReturnType<typeof getTourCatalog>> | null = null;
+  let displayTourIds: string[] = [];
 
   try {
     for (let turn = 0; turn < 5; turn++) {
@@ -382,16 +401,17 @@ export async function POST(req: NextRequest) {
         const responseParts = await Promise.all(
           functionCalls.map(async (fc) => {
             const name = fc.name ?? "";
+            const args = (fc.args as Record<string, unknown>) ?? {};
             toolsUsed.push(name);
-            const result = await executeFunctionCall(
-              name,
-              (fc.args as Record<string, unknown>) ?? {}
-            );
+            const result = await executeFunctionCall(name, args);
             if (name === "get_weather_forecast" && !("error" in result)) {
               lastWeather = result as Awaited<ReturnType<typeof getWeatherForecast>>;
             }
             if (name === "get_tour_catalog" && !("error" in result)) {
               lastCatalog = result as Awaited<ReturnType<typeof getTourCatalog>>;
+            }
+            if (name === "show_tour_cards" && Array.isArray(args.tour_ids)) {
+              displayTourIds = displayTourIds.concat(args.tour_ids.map(String));
             }
             return {
               functionResponse: {
@@ -409,15 +429,10 @@ export async function POST(req: NextRequest) {
       const replyText = response.text ?? "";
       const catalogSnapshot = lastCatalog;
       let matchedTours: Record<string, unknown>[] | null = null;
-      if (catalogSnapshot && !("error" in catalogSnapshot)) {
+      if (catalogSnapshot && !("error" in catalogSnapshot) && displayTourIds.length > 0) {
         const tours = (catalogSnapshot as { tours: Record<string, unknown>[] }).tours;
-        matchedTours = tours.filter((t) => {
-          const id = String(t.tour_id ?? "");
-          const name = String(t.tour_name ?? "");
-          return (
-            (id && replyText.includes(id)) || (name && replyText.includes(name))
-          );
-        });
+        const idSet = new Set(displayTourIds);
+        matchedTours = tours.filter((t) => idSet.has(String(t.tour_id ?? "")));
         if (matchedTours.length === 0) matchedTours = null;
       }
 
