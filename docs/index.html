@@ -459,6 +459,9 @@
     font-size: .76rem;
     margin-bottom: 10px;
   }
+  .tc-weather {
+    color: var(--accent);
+  }
   .tc-map {
     display: inline-block;
     font-size: .76rem;
@@ -723,6 +726,56 @@
     return new Date(iso + "T00:00:00").toLocaleDateString("en-IE", { weekday: "short" });
   }
 
+  const miniWeatherCache = new Map();
+
+  async function geocodeIreland(name) {
+    const res = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(name)}&count=10`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    const results = data.results || [];
+    return results.find((r) => r.country_code === "IE") || results[0] || null;
+  }
+
+  async function loadMiniWeather(tour, slotEl) {
+    if (!slotEl) return;
+    const locationName = (tour.location || tour.meeting_point || "").split(",")[0].trim();
+    if (!locationName) {
+      slotEl.textContent = "🌡️ Weather unavailable";
+      return;
+    }
+
+    if (miniWeatherCache.has(locationName)) {
+      renderMiniWeather(slotEl, miniWeatherCache.get(locationName));
+      return;
+    }
+
+    try {
+      const place = await geocodeIreland(locationName);
+      if (!place) {
+        slotEl.textContent = "🌡️ Weather unavailable";
+        return;
+      }
+      const wRes = await fetch(
+        `https://api.open-meteo.com/v1/forecast?latitude=${place.latitude}&longitude=${place.longitude}&current=temperature_2m,weather_code`
+      );
+      if (!wRes.ok) throw new Error("forecast fetch failed");
+      const wData = await wRes.json();
+      const result = { temp: wData.current?.temperature_2m, code: wData.current?.weather_code };
+      miniWeatherCache.set(locationName, result);
+      renderMiniWeather(slotEl, result);
+    } catch {
+      slotEl.textContent = "🌡️ Weather unavailable";
+    }
+  }
+
+  function renderMiniWeather(slotEl, result) {
+    if (result.temp === undefined || result.temp === null) {
+      slotEl.textContent = "🌡️ Weather unavailable";
+      return;
+    }
+    slotEl.innerHTML = `${weatherIcon(result.code)} <strong>Now:</strong> ${Math.round(result.temp)}°C, ${weatherLabel(result.code)}`;
+  }
+
   function buildWeatherCard(w) {
     const card = document.createElement("div");
     card.className = "weather-card";
@@ -808,6 +861,7 @@
       <div class="tc-facts">
         <div>📅 <strong>Availability:</strong> ${escapeHtml(tour.availability)}</div>
         <div>🎟 <strong>Slots this week:</strong> ${escapeHtml(tour.slots_this_week)}</div>
+        <div class="tc-weather" data-weather-slot>🌡️ Loading weather…</div>
         ${tour.special_offer ? `<div>🏷 <strong>Offer:</strong> ${escapeHtml(tour.special_offer)}</div>` : ""}
       </div>
       <a class="tc-map" href="https://www.google.com/maps/search/?api=1&query=${mapsQuery}" target="_blank" rel="noopener">📍 View location on Google Maps</a>
@@ -832,9 +886,14 @@
       </div>
     `;
 
+    let weatherLoaded = false;
     header.addEventListener("click", () => {
       details.hidden = !details.hidden;
       header.querySelector(".tc-chevron").textContent = details.hidden ? "▾" : "▴";
+      if (!details.hidden && !weatherLoaded) {
+        weatherLoaded = true;
+        loadMiniWeather(tour, details.querySelector("[data-weather-slot]"));
+      }
     });
 
     const adultsVal = details.querySelector('[data-field-val="adults"]');
