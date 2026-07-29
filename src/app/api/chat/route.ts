@@ -115,14 +115,27 @@ async function getTourCatalog() {
   return { fetched_at: new Date().toISOString(), tour_count: tours.length, tours };
 }
 
-async function geocode(name: string) {
+type GeoResult = {
+  name: string;
+  latitude: number;
+  longitude: number;
+  country_code?: string;
+  admin1?: string;
+  admin2?: string;
+};
+
+async function geocode(name: string): Promise<GeoResult | null> {
+  // Open-Meteo's `country` query param is not a reliable filter (it returns
+  // the same global results with or without it), so fetch several candidates
+  // and prefer an Irish match ourselves rather than trusting the API to filter.
   const geoUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(
     name
-  )}&count=1&country=IE`;
+  )}&count=10`;
   const geoRes = await fetch(geoUrl, { cache: "no-store" });
   if (!geoRes.ok) return null;
   const geoData = await geoRes.json();
-  return geoData.results?.[0] ?? null;
+  const results: GeoResult[] = geoData.results ?? [];
+  return results.find((r) => r.country_code === "IE") ?? results[0] ?? null;
 }
 
 async function getWeatherForecast(location: string) {
