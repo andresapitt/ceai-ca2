@@ -335,6 +335,29 @@ async function getGoogleAccessToken(): Promise<string | null> {
   return data.access_token;
 }
 
+let cachedFirstSheetTitle: { sheetId: string; title: string } | null = null;
+
+// Guessing "Sheet1" breaks the moment someone renames the tab (which Google
+// often does automatically) — so ask the API for the real first tab title.
+async function getFirstSheetTitle(sheetId: string, accessToken: string): Promise<string | null> {
+  if (cachedFirstSheetTitle && cachedFirstSheetTitle.sheetId === sheetId) {
+    return cachedFirstSheetTitle.title;
+  }
+  const res = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}?fields=sheets.properties.title`,
+    { headers: { Authorization: `Bearer ${accessToken}` } }
+  );
+  if (!res.ok) {
+    console.error("Failed to fetch spreadsheet metadata:", await res.text());
+    return null;
+  }
+  const data = await res.json();
+  const title = data.sheets?.[0]?.properties?.title;
+  if (!title) return null;
+  cachedFirstSheetTitle = { sheetId, title };
+  return title;
+}
+
 async function recordBooking(args: BookingArgs) {
   const sheetId = process.env.BOOKING_SHEET_ID;
   if (!sheetId) {
@@ -346,7 +369,14 @@ async function recordBooking(args: BookingArgs) {
     return { error: "Booking system is not connected yet." };
   }
 
-  const range = process.env.BOOKING_SHEET_RANGE || "Sheet1!A:F";
+  let range = process.env.BOOKING_SHEET_RANGE;
+  if (!range) {
+    const title = await getFirstSheetTitle(sheetId, accessToken);
+    if (!title) {
+      return { error: "Could not determine the booking sheet's tab name." };
+    }
+    range = `${title}!A:F`;
+  }
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent(
     range
   )}:append?valueInputOption=USER_ENTERED`;
