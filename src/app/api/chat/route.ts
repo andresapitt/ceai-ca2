@@ -252,7 +252,22 @@ async function getGoogleAccessToken(): Promise<string | null> {
     return cachedAccessToken.token;
   }
 
-  const privateKey = rawKey.replace(/\\n/g, "\n");
+  // Defend against common paste mistakes: surrounding quotes carried over
+  // from the JSON key file, or literal "\n" sequences instead of real newlines.
+  let privateKey = rawKey.trim();
+  if (
+    (privateKey.startsWith('"') && privateKey.endsWith('"')) ||
+    (privateKey.startsWith("'") && privateKey.endsWith("'"))
+  ) {
+    privateKey = privateKey.slice(1, -1);
+  }
+  privateKey = privateKey.replace(/\\n/g, "\n").trim();
+  if (!privateKey.startsWith("-----BEGIN")) {
+    console.error(
+      `GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY doesn't look like a PEM key after normalizing (starts with: ${privateKey.slice(0, 15)}...).`
+    );
+    return null;
+  }
   const now = Math.floor(Date.now() / 1000);
   const header = { alg: "RS256", typ: "JWT" };
   const claims = {
@@ -263,8 +278,14 @@ async function getGoogleAccessToken(): Promise<string | null> {
     exp: now + 3600,
   };
   const unsigned = `${base64url(JSON.stringify(header))}.${base64url(JSON.stringify(claims))}`;
-  const signature = crypto.sign("RSA-SHA256", Buffer.from(unsigned), privateKey);
-  const jwt = `${unsigned}.${base64url(signature)}`;
+  let jwt: string;
+  try {
+    const signature = crypto.sign("RSA-SHA256", Buffer.from(unsigned), privateKey);
+    jwt = `${unsigned}.${base64url(signature)}`;
+  } catch (err) {
+    console.error("Failed to sign JWT with GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY:", err);
+    return null;
+  }
 
   const res = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST",
