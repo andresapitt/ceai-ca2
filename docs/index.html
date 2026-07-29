@@ -680,12 +680,6 @@
       if (m.weather) {
         chatEl.appendChild(buildWeatherCard(m.weather));
       }
-      if (m.toolsUsed && m.toolsUsed.length) {
-        const t = document.createElement("div");
-        t.className = "tools";
-        t.textContent = "🔧 live tool call: " + m.toolsUsed.join(", ");
-        chatEl.appendChild(t);
-      }
     }
     if (loading) {
       const div = document.createElement("div");
