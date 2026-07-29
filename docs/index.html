@@ -403,6 +403,112 @@
   .weather-card .wc-day .d-temp { font-size: .72rem; font-weight: 600; }
   .weather-card .wc-day .d-rain { font-size: .65rem; color: var(--accent); }
 
+  .tour-cards {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    align-self: flex-start;
+    width: 100%;
+  }
+  .tour-card {
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--panel);
+    overflow: hidden;
+  }
+  .tc-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    cursor: pointer;
+  }
+  .tc-main { flex: 1; min-width: 0; }
+  .tc-name {
+    font-weight: 700;
+    font-size: .85rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .tc-meta {
+    display: flex;
+    gap: 10px;
+    margin-top: 3px;
+    font-size: .72rem;
+    color: var(--muted);
+  }
+  .tc-slots { font-weight: 600; color: var(--accent); }
+  .tc-slots-out { color: #c0392b; }
+  .tc-chevron { color: var(--muted); font-size: .8rem; }
+
+  .tc-details {
+    padding: 0 12px 12px;
+    border-top: 1px solid var(--border);
+  }
+  .tc-desc {
+    font-size: .78rem;
+    color: var(--muted);
+    line-height: 1.5;
+    margin: 10px 0;
+  }
+  .tc-facts {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: .76rem;
+    margin-bottom: 10px;
+  }
+  .tc-map {
+    display: inline-block;
+    font-size: .76rem;
+    color: var(--accent);
+    text-decoration: none;
+    margin-bottom: 12px;
+  }
+  .tc-map:hover { text-decoration: underline; }
+
+  .tc-booking {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    padding-top: 10px;
+    border-top: 1px dashed var(--border);
+  }
+  .tc-stepper { display: flex; flex-direction: column; gap: 3px; }
+  .tc-stepper label { font-size: .68rem; color: var(--muted); }
+  .stepper-controls {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .step-btn {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text);
+    font-weight: 700;
+    font-size: .82rem;
+    padding: 0;
+    cursor: pointer;
+    line-height: 1;
+  }
+  .step-val { font-size: .82rem; font-weight: 600; min-width: 14px; text-align: center; }
+  .tc-book-btn {
+    margin-left: auto;
+    border: none;
+    border-radius: 10px;
+    padding: 8px 14px;
+    background: var(--accent);
+    color: var(--accent-text);
+    font-weight: 600;
+    font-size: .78rem;
+    cursor: pointer;
+  }
+
   .composer {
     display: flex;
     gap: 8px;
@@ -664,6 +770,103 @@
     return card;
   }
 
+  function escapeHtml(str) {
+    const d = document.createElement("div");
+    d.textContent = str ?? "";
+    return d.innerHTML;
+  }
+
+  function buildTourCard(tour) {
+    const card = document.createElement("div");
+    card.className = "tour-card";
+
+    const slots = Number(tour.slots_this_week);
+    const soldOut = !Number.isFinite(slots) || slots <= 0;
+
+    const header = document.createElement("div");
+    header.className = "tc-header";
+    header.innerHTML = `
+      <div class="tc-main">
+        <div class="tc-name">${escapeHtml(tour.tour_name)}</div>
+        <div class="tc-meta">
+          <span>⏱ ${escapeHtml(tour.duration_hours)}h</span>
+          <span>€${escapeHtml(tour.price_eur)}</span>
+          <span class="tc-slots ${soldOut ? "tc-slots-out" : ""}">${soldOut ? "Sold out" : slots + " left"}</span>
+        </div>
+      </div>
+      <div class="tc-chevron">▾</div>
+    `;
+
+    const details = document.createElement("div");
+    details.className = "tc-details";
+    details.hidden = true;
+
+    const mapsQuery = encodeURIComponent(`${tour.meeting_point || tour.location || ""}, Ireland`);
+
+    details.innerHTML = `
+      <p class="tc-desc">${escapeHtml(tour.description)}</p>
+      <div class="tc-facts">
+        <div>📅 <strong>Availability:</strong> ${escapeHtml(tour.availability)}</div>
+        <div>🎟 <strong>Slots this week:</strong> ${escapeHtml(tour.slots_this_week)}</div>
+        ${tour.special_offer ? `<div>🏷 <strong>Offer:</strong> ${escapeHtml(tour.special_offer)}</div>` : ""}
+      </div>
+      <a class="tc-map" href="https://www.google.com/maps/search/?api=1&query=${mapsQuery}" target="_blank" rel="noopener">📍 View location on Google Maps</a>
+      <div class="tc-booking">
+        <div class="tc-stepper">
+          <label>Adults</label>
+          <div class="stepper-controls">
+            <button type="button" class="step-btn" data-field="adults" data-step="-1">–</button>
+            <span class="step-val" data-field-val="adults">1</span>
+            <button type="button" class="step-btn" data-field="adults" data-step="1">+</button>
+          </div>
+        </div>
+        <div class="tc-stepper">
+          <label>Kids</label>
+          <div class="stepper-controls">
+            <button type="button" class="step-btn" data-field="kids" data-step="-1">–</button>
+            <span class="step-val" data-field-val="kids">0</span>
+            <button type="button" class="step-btn" data-field="kids" data-step="1">+</button>
+          </div>
+        </div>
+        <button type="button" class="tc-book-btn">Book this tour</button>
+      </div>
+    `;
+
+    header.addEventListener("click", () => {
+      details.hidden = !details.hidden;
+      header.querySelector(".tc-chevron").textContent = details.hidden ? "▾" : "▴";
+    });
+
+    const adultsVal = details.querySelector('[data-field-val="adults"]');
+    const kidsVal = details.querySelector('[data-field-val="kids"]');
+
+    details.querySelectorAll(".step-btn").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const field = btn.dataset.field;
+        const delta = parseInt(btn.dataset.step, 10);
+        const el = field === "adults" ? adultsVal : kidsVal;
+        const min = field === "adults" ? 1 : 0;
+        let val = parseInt(el.textContent, 10) + delta;
+        if (val < min) val = min;
+        el.textContent = val;
+      });
+    });
+
+    details.querySelector(".tc-book-btn").addEventListener("click", (e) => {
+      e.stopPropagation();
+      const adults = parseInt(adultsVal.textContent, 10);
+      const kids = parseInt(kidsVal.textContent, 10);
+      const kidsPart = kids > 0 ? ` and ${kids} child${kids > 1 ? "ren" : ""}` : "";
+      inputEl.value = `I'd like to book ${adults} adult${adults > 1 ? "s" : ""}${kidsPart} for the ${tour.tour_name} (${tour.tour_id}).`;
+      send();
+    });
+
+    card.appendChild(header);
+    card.appendChild(details);
+    return card;
+  }
+
   function render() {
     chatEl.innerHTML = "";
     if (messages.length === 0) {
@@ -679,6 +882,12 @@
       chatEl.appendChild(div);
       if (m.weather) {
         chatEl.appendChild(buildWeatherCard(m.weather));
+      }
+      if (m.tours && m.tours.length) {
+        const wrap = document.createElement("div");
+        wrap.className = "tour-cards";
+        m.tours.forEach((t) => wrap.appendChild(buildTourCard(t)));
+        chatEl.appendChild(wrap);
       }
     }
     if (loading) {
@@ -708,7 +917,7 @@
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Something went wrong.");
-      messages.push({ role: "model", text: data.text, toolsUsed: data.toolsUsed, weather: data.weather });
+      messages.push({ role: "model", text: data.text, toolsUsed: data.toolsUsed, weather: data.weather, tours: data.tours });
     } catch (err) {
       errorEl.textContent = err.message || "Something went wrong.";
     } finally {

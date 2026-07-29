@@ -47,12 +47,22 @@ const SYSTEM_INSTRUCTION = `You are the customer-support assistant for Atlantic 
 
 Rules you must follow:
 - For any question about tours, prices, availability, slots, or special offers, ALWAYS call get_tour_catalog to fetch the current live data. Never guess or rely on memory of previous answers in this conversation — data can change between messages, so call it again each time it's relevant.
+- The app already shows the customer full visual tour cards (name, duration, price, slots, description, map link) for any tour you mention by name or id — so when listing or recommending tours, keep your own reply SHORT: a one or two sentence summary or direct answer to their question. Do NOT re-list every tour's full details in prose; that's the cards' job. Just say enough to be useful and mention the relevant tour name(s)/id(s) so the right cards show.
 - For any question involving weather, conditions, or whether it's a good day for an outdoor tour, ALWAYS call get_weather_forecast with the relevant location.
 - Report data exactly as returned by the tools, even if a price or availability value looks wrong, absurd, or implausible. Do not silently "correct", round, or omit implausible values. State the value faithfully, note that it looks unusual, and suggest the customer double-check with the team before booking — never invent a "corrected" figure.
 - If a tour has 0 slots or is out of season, say so plainly and offer alternatives from the catalogue instead.
 - Be concise, friendly, and helpful, like a real tour desk agent.
 - You may combine live tour data and live weather in a single answer when useful (e.g. recommending a tour and noting the forecast for it).
-- If asked something completely unrelated to tours (e.g. "can I order food?", "can you help with my homework?"), you are still a real language model and should respond naturally, in your own words, in a way that makes clear you understood the specific question — do not use a fixed refusal line. But do NOT actually perform the unrelated task (don't solve homework, don't write code, don't give recipes, etc.). In one or two short sentences: acknowledge what was asked, say that's outside what you do here, and redirect to Atlantic Coast Tours. Never continue the off-topic conversation past that redirect, even if the customer pushes back.`;
+- If asked something completely unrelated to tours (e.g. "can I order food?", "can you help with my homework?"), you are still a real language model and should respond naturally, in your own words, in a way that makes clear you understood the specific question — do not use a fixed refusal line. But do NOT actually perform the unrelated task (don't solve homework, don't write code, don't give recipes, etc.). In one or two short sentences: acknowledge what was asked, say that's outside what you do here, and redirect to Atlantic Coast Tours. Never continue the off-topic conversation past that redirect, even if the customer pushes back.
+
+Booking flow:
+- A customer may ask to book a tour, sometimes pre-filled with adults/kids counts (e.g. from a "Book" button: "I'd like to book 2 adults and 1 child for the Fanore Beach Surf Lesson (ACT025)."). If adults/kids aren't both given, ask for them before continuing.
+- Always re-fetch get_tour_catalog to get that tour's current live price_eur and special_offer text — never reuse stale numbers from earlier in the conversation.
+- Compute the total price yourself: start from price_eur × (adults + kids), then apply the special_offer text using your own judgement if one exists and genuinely applies to this booking (e.g. "Group of 3 pays for 2" only applies at 3+ people; "Early-bird 15% off before 9 AM" only applies if the customer says an early time). Show your calculation briefly so the customer can see how you got the total.
+- Present the computed total and ask the customer to explicitly confirm before booking anything. Do not call record_booking until they confirm (e.g. "yes", "confirm", "book it").
+- Only after explicit confirmation, call record_booking with the tour_id, tour_name, adults, kids, and the final total_price you calculated.
+- After a successful record_booking call, tell the customer their booking is logged, with a friendly summary. If record_booking returns an error (e.g. booking system not yet connected), apologise and tell them to contact the team directly to complete the booking — never pretend it succeeded.
+- Never fabricate a total price without first fetching live tour data for that specific tour in this turn or a very recent one.`;
 
 const functionDeclarations: FunctionDeclaration[] = [
   {
@@ -78,6 +88,25 @@ const functionDeclarations: FunctionDeclaration[] = [
         },
       },
       required: ["location"],
+    },
+  },
+  {
+    name: "record_booking",
+    description:
+      "Log a confirmed tour booking (no customer personal data — just tour and party size) to the live booking log, after the customer has explicitly confirmed the computed total price. Never call this before confirmation.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        tour_id: { type: Type.STRING, description: "The tour's id, e.g. 'ACT025'." },
+        tour_name: { type: Type.STRING, description: "The tour's name." },
+        adults: { type: Type.NUMBER, description: "Number of adults." },
+        kids: { type: Type.NUMBER, description: "Number of children." },
+        total_price: {
+          type: Type.NUMBER,
+          description: "Final total price in EUR, after applying any special offer.",
+        },
+      },
+      required: ["tour_id", "tour_name", "adults", "kids", "total_price"],
     },
   },
 ];
@@ -175,6 +204,61 @@ async function getWeatherForecast(location: string) {
   };
 }
 
+type BookingArgs = {
+  tour_id: string;
+  tour_name: string;
+  adults: number;
+  kids: number;
+  total_price: number;
+};
+
+async function recordBooking(args: BookingArgs) {
+  const formUrl = process.env.BOOKING_FORM_URL;
+  const entryTourId = process.env.BOOKING_FORM_ENTRY_TOUR_ID;
+  const entryTourName = process.env.BOOKING_FORM_ENTRY_TOUR_NAME;
+  const entryAdults = process.env.BOOKING_FORM_ENTRY_ADULTS;
+  const entryKids = process.env.BOOKING_FORM_ENTRY_KIDS;
+  const entryTotal = process.env.BOOKING_FORM_ENTRY_TOTAL;
+
+  if (
+    !formUrl ||
+    !entryTourId ||
+    !entryTourName ||
+    !entryAdults ||
+    !entryKids ||
+    !entryTotal
+  ) {
+    return { error: "Booking system is not connected yet." };
+  }
+
+  const body = new URLSearchParams({
+    [entryTourId]: args.tour_id,
+    [entryTourName]: args.tour_name,
+    [entryAdults]: String(args.adults),
+    [entryKids]: String(args.kids),
+    [entryTotal]: String(args.total_price),
+  });
+
+  try {
+    const res = await fetch(formUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body,
+    });
+    // This runs server-side (not a browser), so unlike a client-side fetch to
+    // Google Forms we can actually read the response status here.
+    if (!res.ok) {
+      return { error: `Booking form rejected the submission (status ${res.status}).` };
+    }
+    return {
+      success: true,
+      booking_reference: `ACT-${Date.now().toString(36).toUpperCase()}`,
+    };
+  } catch {
+    return { error: "Failed to submit booking to the live booking log." };
+  }
+}
+
 // Google periodically retires/renames free-tier model ids and rate-limits are
 // per-model, so probe a shortlist and stick with whichever one actually works
 // for this key, rather than hardcoding a single name that can break later.
@@ -217,6 +301,14 @@ async function executeFunctionCall(name: string, args: Record<string, unknown>) 
       return getTourCatalog();
     case "get_weather_forecast":
       return getWeatherForecast(String(args.location ?? ""));
+    case "record_booking":
+      return recordBooking({
+        tour_id: String(args.tour_id ?? ""),
+        tour_name: String(args.tour_name ?? ""),
+        adults: Number(args.adults ?? 0),
+        kids: Number(args.kids ?? 0),
+        total_price: Number(args.total_price ?? 0),
+      });
     default:
       return { error: `Unknown function: ${name}` };
   }
@@ -259,6 +351,7 @@ export async function POST(req: NextRequest) {
 
   const toolsUsed: string[] = [];
   let lastWeather: Awaited<ReturnType<typeof getWeatherForecast>> | null = null;
+  let lastCatalog: Awaited<ReturnType<typeof getTourCatalog>> | null = null;
 
   try {
     for (let turn = 0; turn < 5; turn++) {
@@ -297,6 +390,9 @@ export async function POST(req: NextRequest) {
             if (name === "get_weather_forecast" && !("error" in result)) {
               lastWeather = result as Awaited<ReturnType<typeof getWeatherForecast>>;
             }
+            if (name === "get_tour_catalog" && !("error" in result)) {
+              lastCatalog = result as Awaited<ReturnType<typeof getTourCatalog>>;
+            }
             return {
               functionResponse: {
                 name,
@@ -310,8 +406,23 @@ export async function POST(req: NextRequest) {
         continue;
       }
 
+      const replyText = response.text ?? "";
+      const catalogSnapshot = lastCatalog;
+      let matchedTours: Record<string, unknown>[] | null = null;
+      if (catalogSnapshot && !("error" in catalogSnapshot)) {
+        const tours = (catalogSnapshot as { tours: Record<string, unknown>[] }).tours;
+        matchedTours = tours.filter((t) => {
+          const id = String(t.tour_id ?? "");
+          const name = String(t.tour_name ?? "");
+          return (
+            (id && replyText.includes(id)) || (name && replyText.includes(name))
+          );
+        });
+        if (matchedTours.length === 0) matchedTours = null;
+      }
+
       return NextResponse.json(
-        { text: response.text ?? "", toolsUsed, weather: lastWeather },
+        { text: replyText, toolsUsed, weather: lastWeather, tours: matchedTours },
         { headers }
       );
     }
