@@ -243,28 +243,56 @@ let cachedAccessToken: { token: string; expiresAt: number } | null = null;
 // short-lived JWT with the service account's key and exchanges it for an
 // OAuth2 access token (the standard service-account "JWT Bearer" flow),
 // caching the token in-memory for the life of this serverless instance.
+function normalizePemKey(raw: string): string {
+  let key = raw.trim();
+  if (
+    (key.startsWith('"') && key.endsWith('"')) ||
+    (key.startsWith("'") && key.endsWith("'"))
+  ) {
+    key = key.slice(1, -1);
+  }
+  return key.replace(/\\n/g, "\n").trim();
+}
+
+function resolveServiceAccountCredentials(): { email: string; privateKey: string } | null {
+  const envEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
+  const rawKeyVar = process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY;
+  if (!rawKeyVar) return null;
+
+  const trimmed = rawKeyVar.trim();
+  // Accept either the raw PEM value, or the whole downloaded JSON key file
+  // pasted in as-is — both are common depending on how it was copied.
+  if (trimmed.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (parsed.private_key) {
+        return {
+          email: envEmail || parsed.client_email || "",
+          privateKey: normalizePemKey(String(parsed.private_key)),
+        };
+      }
+    } catch (err) {
+      console.error("GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY looks like JSON but failed to parse:", err);
+      return null;
+    }
+  }
+
+  if (!envEmail) return null;
+  return { email: envEmail, privateKey: normalizePemKey(trimmed) };
+}
+
 async function getGoogleAccessToken(): Promise<string | null> {
-  const email = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
-  const rawKey = process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY;
-  if (!email || !rawKey) return null;
+  const creds = resolveServiceAccountCredentials();
+  if (!creds || !creds.email || !creds.privateKey) return null;
+  const { email, privateKey } = creds;
 
   if (cachedAccessToken && cachedAccessToken.expiresAt > Date.now() + 30_000) {
     return cachedAccessToken.token;
   }
 
-  // Defend against common paste mistakes: surrounding quotes carried over
-  // from the JSON key file, or literal "\n" sequences instead of real newlines.
-  let privateKey = rawKey.trim();
-  if (
-    (privateKey.startsWith('"') && privateKey.endsWith('"')) ||
-    (privateKey.startsWith("'") && privateKey.endsWith("'"))
-  ) {
-    privateKey = privateKey.slice(1, -1);
-  }
-  privateKey = privateKey.replace(/\\n/g, "\n").trim();
   if (!privateKey.startsWith("-----BEGIN")) {
     console.error(
-      `GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY doesn't look like a PEM key after normalizing (starts with: ${privateKey.slice(0, 15)}...).`
+      `Service account private key doesn't look like a PEM key after normalizing (starts with: ${privateKey.slice(0, 15)}...).`
     );
     return null;
   }
