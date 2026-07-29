@@ -357,6 +357,52 @@
     margin-top: -4px;
   }
 
+  .weather-card {
+    align-self: flex-start;
+    max-width: 92%;
+    background: linear-gradient(155deg, color-mix(in srgb, var(--accent) 16%, var(--panel)), var(--panel));
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 12px 14px;
+    font-size: .82rem;
+  }
+  .weather-card .wc-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .weather-card .wc-icon { font-size: 1.9rem; line-height: 1; }
+  .weather-card .wc-place { font-weight: 700; font-size: .86rem; }
+  .weather-card .wc-desc { color: var(--muted); font-size: .74rem; }
+  .weather-card .wc-temp {
+    margin-left: auto;
+    font-size: 1.5rem;
+    font-weight: 700;
+  }
+  .weather-card .wc-meta {
+    display: flex;
+    gap: 14px;
+    margin: 8px 0 10px;
+    font-size: .74rem;
+    color: var(--muted);
+  }
+  .weather-card .wc-days {
+    display: flex;
+    gap: 8px;
+  }
+  .weather-card .wc-day {
+    flex: 1;
+    text-align: center;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 6px 4px;
+  }
+  .weather-card .wc-day .d-name { font-size: .68rem; color: var(--muted); }
+  .weather-card .wc-day .d-icon { font-size: 1.15rem; margin: 2px 0; }
+  .weather-card .wc-day .d-temp { font-size: .72rem; font-weight: 600; }
+  .weather-card .wc-day .d-rain { font-size: .65rem; color: var(--accent); }
+
   .composer {
     display: flex;
     gap: 8px;
@@ -530,6 +576,94 @@
     }
   }
 
+  const WEATHER_ICONS = {
+    0: ["☀️", "Clear sky"],
+    1: ["🌤️", "Mostly clear"],
+    2: ["⛅", "Partly cloudy"],
+    3: ["☁️", "Overcast"],
+    45: ["🌫️", "Fog"],
+    48: ["🌫️", "Fog"],
+    51: ["🌦️", "Light drizzle"],
+    53: ["🌦️", "Drizzle"],
+    55: ["🌦️", "Heavy drizzle"],
+    56: ["🌦️", "Freezing drizzle"],
+    57: ["🌦️", "Freezing drizzle"],
+    61: ["🌧️", "Light rain"],
+    63: ["🌧️", "Rain"],
+    65: ["🌧️", "Heavy rain"],
+    66: ["🌧️", "Freezing rain"],
+    67: ["🌧️", "Freezing rain"],
+    71: ["🌨️", "Light snow"],
+    73: ["🌨️", "Snow"],
+    75: ["🌨️", "Heavy snow"],
+    77: ["🌨️", "Snow grains"],
+    80: ["🌦️", "Rain showers"],
+    81: ["🌧️", "Rain showers"],
+    82: ["⛈️", "Heavy rain showers"],
+    85: ["🌨️", "Snow showers"],
+    86: ["🌨️", "Snow showers"],
+    95: ["⛈️", "Thunderstorm"],
+    96: ["⛈️", "Thunderstorm, hail"],
+    99: ["⛈️", "Thunderstorm, hail"],
+  };
+
+  function weatherIcon(code) {
+    return (WEATHER_ICONS[code] || ["🌡️", "Weather"])[0];
+  }
+  function weatherLabel(code) {
+    return (WEATHER_ICONS[code] || ["🌡️", "Weather"])[1];
+  }
+  function dayName(iso) {
+    return new Date(iso + "T00:00:00").toLocaleDateString("en-IE", { weekday: "short" });
+  }
+
+  function buildWeatherCard(w) {
+    const card = document.createElement("div");
+    card.className = "weather-card";
+
+    const cur = w.current || {};
+    const daily = w.daily_forecast || {};
+
+    const head = document.createElement("div");
+    head.className = "wc-head";
+    head.innerHTML = `
+      <span class="wc-icon">${weatherIcon(cur.weather_code)}</span>
+      <span>
+        <div class="wc-place">${w.location}${w.admin_area ? ", " + w.admin_area : ""}</div>
+        <div class="wc-desc">${weatherLabel(cur.weather_code)}</div>
+      </span>
+      <span class="wc-temp">${Math.round(cur.temperature_2m)}°</span>
+    `;
+    card.appendChild(head);
+
+    const meta = document.createElement("div");
+    meta.className = "wc-meta";
+    meta.innerHTML = `
+      <span>💨 ${Math.round(cur.wind_speed_10m)} km/h</span>
+      <span>💧 ${cur.precipitation ?? 0} mm now</span>
+    `;
+    card.appendChild(meta);
+
+    if (Array.isArray(daily.time)) {
+      const days = document.createElement("div");
+      days.className = "wc-days";
+      daily.time.forEach((iso, i) => {
+        const d = document.createElement("div");
+        d.className = "wc-day";
+        d.innerHTML = `
+          <div class="d-name">${dayName(iso)}</div>
+          <div class="d-icon">${weatherIcon(daily.weather_code?.[i])}</div>
+          <div class="d-temp">${Math.round(daily.temperature_2m_max?.[i])}° / ${Math.round(daily.temperature_2m_min?.[i])}°</div>
+          <div class="d-rain">${daily.precipitation_probability_max?.[i] ?? 0}%</div>
+        `;
+        days.appendChild(d);
+      });
+      card.appendChild(days);
+    }
+
+    return card;
+  }
+
   function render() {
     chatEl.innerHTML = "";
     if (messages.length === 0) {
@@ -543,6 +677,9 @@
       div.className = "msg " + m.role;
       div.textContent = m.text;
       chatEl.appendChild(div);
+      if (m.weather) {
+        chatEl.appendChild(buildWeatherCard(m.weather));
+      }
       if (m.toolsUsed && m.toolsUsed.length) {
         const t = document.createElement("div");
         t.className = "tools";
@@ -577,7 +714,7 @@
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Something went wrong.");
-      messages.push({ role: "model", text: data.text, toolsUsed: data.toolsUsed });
+      messages.push({ role: "model", text: data.text, toolsUsed: data.toolsUsed, weather: data.weather });
     } catch (err) {
       errorEl.textContent = err.message || "Something went wrong.";
     } finally {

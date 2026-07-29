@@ -245,6 +245,7 @@ export async function POST(req: NextRequest) {
   }));
 
   const toolsUsed: string[] = [];
+  let lastWeather: Awaited<ReturnType<typeof getWeatherForecast>> | null = null;
 
   try {
     for (let turn = 0; turn < 5; turn++) {
@@ -280,6 +281,9 @@ export async function POST(req: NextRequest) {
               name,
               (fc.args as Record<string, unknown>) ?? {}
             );
+            if (name === "get_weather_forecast" && !("error" in result)) {
+              lastWeather = result as Awaited<ReturnType<typeof getWeatherForecast>>;
+            }
             return {
               functionResponse: {
                 name,
@@ -294,7 +298,7 @@ export async function POST(req: NextRequest) {
       }
 
       return NextResponse.json(
-        { text: response.text ?? "", toolsUsed },
+        { text: response.text ?? "", toolsUsed, weather: lastWeather },
         { headers }
       );
     }
