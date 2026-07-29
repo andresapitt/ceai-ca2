@@ -5,6 +5,7 @@ import {
   type FunctionDeclaration,
 } from "@google/genai";
 import { NextRequest, NextResponse } from "next/server";
+import crypto from "node:crypto";
 
 export const runtime = "nodejs";
 
@@ -228,50 +229,110 @@ type BookingArgs = {
   total_price: number;
 };
 
-async function recordBooking(args: BookingArgs) {
-  const formUrl = process.env.BOOKING_FORM_URL;
-  const entryTourId = process.env.BOOKING_FORM_ENTRY_TOUR_ID;
-  const entryTourName = process.env.BOOKING_FORM_ENTRY_TOUR_NAME;
-  const entryAdults = process.env.BOOKING_FORM_ENTRY_ADULTS;
-  const entryKids = process.env.BOOKING_FORM_ENTRY_KIDS;
-  const entryTotal = process.env.BOOKING_FORM_ENTRY_TOTAL;
+function base64url(input: Buffer | string) {
+  return Buffer.from(input)
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+}
 
-  if (
-    !formUrl ||
-    !entryTourId ||
-    !entryTourName ||
-    !entryAdults ||
-    !entryKids ||
-    !entryTotal
-  ) {
+let cachedAccessToken: { token: string; expiresAt: number } | null = null;
+
+// Google Sheets writes need real auth even on a "public" sheet — this signs a
+// short-lived JWT with the service account's key and exchanges it for an
+// OAuth2 access token (the standard service-account "JWT Bearer" flow),
+// caching the token in-memory for the life of this serverless instance.
+async function getGoogleAccessToken(): Promise<string | null> {
+  const email = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
+  const rawKey = process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY;
+  if (!email || !rawKey) return null;
+
+  if (cachedAccessToken && cachedAccessToken.expiresAt > Date.now() + 30_000) {
+    return cachedAccessToken.token;
+  }
+
+  const privateKey = rawKey.replace(/\\n/g, "\n");
+  const now = Math.floor(Date.now() / 1000);
+  const header = { alg: "RS256", typ: "JWT" };
+  const claims = {
+    iss: email,
+    scope: "https://www.googleapis.com/auth/spreadsheets",
+    aud: "https://oauth2.googleapis.com/token",
+    iat: now,
+    exp: now + 3600,
+  };
+  const unsigned = `${base64url(JSON.stringify(header))}.${base64url(JSON.stringify(claims))}`;
+  const signature = crypto.sign("RSA-SHA256", Buffer.from(unsigned), privateKey);
+  const jwt = `${unsigned}.${base64url(signature)}`;
+
+  const res = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+      assertion: jwt,
+    }),
+  });
+  if (!res.ok) {
+    console.error("Google token exchange failed:", await res.text());
+    return null;
+  }
+  const data = await res.json();
+  cachedAccessToken = {
+    token: data.access_token,
+    expiresAt: Date.now() + data.expires_in * 1000,
+  };
+  return data.access_token;
+}
+
+async function recordBooking(args: BookingArgs) {
+  const sheetId = process.env.BOOKING_SHEET_ID;
+  if (!sheetId) {
     return { error: "Booking system is not connected yet." };
   }
 
-  const body = new URLSearchParams({
-    [entryTourId]: args.tour_id,
-    [entryTourName]: args.tour_name,
-    [entryAdults]: String(args.adults),
-    [entryKids]: String(args.kids),
-    [entryTotal]: String(args.total_price),
-  });
+  const accessToken = await getGoogleAccessToken();
+  if (!accessToken) {
+    return { error: "Booking system is not connected yet." };
+  }
+
+  const range = process.env.BOOKING_SHEET_RANGE || "Sheet1!A:F";
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent(
+    range
+  )}:append?valueInputOption=USER_ENTERED`;
 
   try {
-    const res = await fetch(formUrl, {
+    const res = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body,
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        values: [
+          [
+            new Date().toISOString(),
+            args.tour_id,
+            args.tour_name,
+            args.adults,
+            args.kids,
+            args.total_price,
+          ],
+        ],
+      }),
     });
-    // This runs server-side (not a browser), so unlike a client-side fetch to
-    // Google Forms we can actually read the response status here.
     if (!res.ok) {
-      return { error: `Booking form rejected the submission (status ${res.status}).` };
+      console.error("Sheets append failed:", await res.text());
+      return { error: "Failed to write booking to the live sheet." };
     }
     return {
       success: true,
       booking_reference: `ACT-${Date.now().toString(36).toUpperCase()}`,
     };
-  } catch {
-    return { error: "Failed to submit booking to the live booking log." };
+  } catch (err) {
+    console.error("Booking write failed:", err);
+    return { error: "Failed to write booking to the live sheet." };
   }
 }
 
