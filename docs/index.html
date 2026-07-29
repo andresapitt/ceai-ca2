@@ -386,22 +386,23 @@
     font-size: .74rem;
     color: var(--muted);
   }
-  .weather-card .wc-days {
+  .wc-days {
     display: flex;
     gap: 8px;
   }
-  .weather-card .wc-day {
+  .wc-day {
     flex: 1;
+    min-width: 0;
     text-align: center;
     background: var(--bg);
     border: 1px solid var(--border);
     border-radius: 10px;
     padding: 6px 4px;
   }
-  .weather-card .wc-day .d-name { font-size: .68rem; color: var(--muted); }
-  .weather-card .wc-day .d-icon { font-size: 1.15rem; margin: 2px 0; }
-  .weather-card .wc-day .d-temp { font-size: .72rem; font-weight: 600; }
-  .weather-card .wc-day .d-rain { font-size: .65rem; color: var(--accent); }
+  .wc-day .d-name { font-size: .68rem; color: var(--muted); }
+  .wc-day .d-icon { font-size: 1.15rem; margin: 2px 0; }
+  .wc-day .d-temp { font-size: .72rem; font-weight: 600; }
+  .wc-day .d-rain { font-size: .65rem; color: var(--accent); }
 
   .tour-cards {
     display: flex;
@@ -461,6 +462,9 @@
   }
   .tc-weather {
     color: var(--accent);
+  }
+  .tc-mini-days {
+    margin-top: 6px;
   }
   .tc-map {
     display: inline-block;
@@ -756,11 +760,15 @@
         return;
       }
       const wRes = await fetch(
-        `https://api.open-meteo.com/v1/forecast?latitude=${place.latitude}&longitude=${place.longitude}&current=temperature_2m,weather_code`
+        `https://api.open-meteo.com/v1/forecast?latitude=${place.latitude}&longitude=${place.longitude}&current=temperature_2m,weather_code&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,weather_code&timezone=Europe%2FDublin&forecast_days=3`
       );
       if (!wRes.ok) throw new Error("forecast fetch failed");
       const wData = await wRes.json();
-      const result = { temp: wData.current?.temperature_2m, code: wData.current?.weather_code };
+      const result = {
+        temp: wData.current?.temperature_2m,
+        code: wData.current?.weather_code,
+        daily: wData.daily,
+      };
       miniWeatherCache.set(locationName, result);
       renderMiniWeather(slotEl, result);
     } catch {
@@ -773,7 +781,23 @@
       slotEl.textContent = "🌡️ Weather unavailable";
       return;
     }
-    slotEl.innerHTML = `${weatherIcon(result.code)} <strong>Now:</strong> ${Math.round(result.temp)}°C, ${weatherLabel(result.code)}`;
+    let html = `<div>${weatherIcon(result.code)} <strong>Now:</strong> ${Math.round(result.temp)}°C, ${weatherLabel(result.code)}</div>`;
+    const daily = result.daily;
+    if (Array.isArray(daily?.time)) {
+      html += `<div class="wc-days tc-mini-days">`;
+      daily.time.forEach((iso, i) => {
+        html += `
+          <div class="wc-day">
+            <div class="d-name">${dayName(iso)}</div>
+            <div class="d-icon">${weatherIcon(daily.weather_code?.[i])}</div>
+            <div class="d-temp">${Math.round(daily.temperature_2m_max?.[i])}° / ${Math.round(daily.temperature_2m_min?.[i])}°</div>
+            <div class="d-rain">${daily.precipitation_probability_max?.[i] ?? 0}%</div>
+          </div>
+        `;
+      });
+      html += `</div>`;
+    }
+    slotEl.innerHTML = html;
   }
 
   function buildWeatherCard(w) {
