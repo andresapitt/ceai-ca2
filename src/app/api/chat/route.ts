@@ -58,11 +58,12 @@ Rules you must follow:
 
 Booking flow:
 - A customer may ask to book a tour, sometimes pre-filled with adults/kids counts (e.g. from a "Book" button: "I'd like to book 2 adults and 1 child for the Fanore Beach Surf Lesson (ACT025)."). If adults/kids aren't both given, ask for them before continuing.
+- You also need the customer's name and email address before you can confirm anything, so a confirmation email can be sent — ask for both if not already given. Briefly note their name/email is only used to send this one confirmation email, not stored anywhere public.
 - Always re-fetch get_tour_catalog to get that tour's current live price_eur and special_offer text — never reuse stale numbers from earlier in the conversation.
 - Compute the total price yourself: start from price_eur × (adults + kids), then apply the special_offer text using your own judgement if one exists and genuinely applies to this booking (e.g. "Group of 3 pays for 2" only applies at 3+ people; "Early-bird 15% off before 9 AM" only applies if the customer says an early time). Show your calculation briefly so the customer can see how you got the total. Call show_tour_cards with this tour's id so its card stays visible during the conversation.
-- Present the computed total and ask the customer to explicitly confirm before booking anything. Do not call record_booking until they confirm (e.g. "yes", "confirm", "book it").
-- Only after explicit confirmation, call record_booking with the tour_id, tour_name, adults, kids, and the final total_price you calculated.
-- After a successful record_booking call, tell the customer their booking is logged, with a friendly summary. If record_booking returns an error (e.g. booking system not yet connected), apologise and tell them to contact the team directly to complete the booking — never pretend it succeeded.
+- Present the computed total and ask the customer to explicitly confirm before booking anything. Do not call record_booking or send_confirmation_email until they confirm (e.g. "yes", "confirm", "book it").
+- Only after explicit confirmation: (1) call record_booking with the tour_id, tour_name, adults, kids, and the final total_price — this log never includes the customer's name or email; then (2) call send_confirmation_email with the customer's name, email, and the same booking details, using the booking_reference record_booking returned.
+- After both calls, tell the customer their booking is confirmed and a confirmation email is on its way, with a friendly summary. If either call returns an error, apologise for that specific part (log vs email) and tell them to contact the team directly if needed — never pretend something succeeded that didn't.
 - Never fabricate a total price without first fetching live tour data for that specific tour in this turn or a very recent one.`;
 
 const functionDeclarations: FunctionDeclaration[] = [
@@ -124,6 +125,35 @@ const functionDeclarations: FunctionDeclaration[] = [
         },
       },
       required: ["tour_id", "tour_name", "adults", "kids", "total_price"],
+    },
+  },
+  {
+    name: "send_confirmation_email",
+    description:
+      "Send the customer a booking confirmation email. Only call this after record_booking has succeeded and you have the customer's name and email.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        name: { type: Type.STRING, description: "Customer's name." },
+        email: { type: Type.STRING, description: "Customer's email address." },
+        tour_name: { type: Type.STRING },
+        adults: { type: Type.NUMBER },
+        kids: { type: Type.NUMBER },
+        total_price: { type: Type.NUMBER },
+        booking_reference: {
+          type: Type.STRING,
+          description: "The booking_reference returned by record_booking.",
+        },
+      },
+      required: [
+        "name",
+        "email",
+        "tour_name",
+        "adults",
+        "kids",
+        "total_price",
+        "booking_reference",
+      ],
     },
   },
 ];
@@ -415,6 +445,73 @@ async function recordBooking(args: BookingArgs) {
   }
 }
 
+type ConfirmationEmailArgs = {
+  name: string;
+  email: string;
+  tour_name: string;
+  adults: number;
+  kids: number;
+  total_price: number;
+  booking_reference: string;
+};
+
+async function sendConfirmationEmail(args: ConfirmationEmailArgs) {
+  const apiKey = process.env.RESEND_API_KEY;
+  const from = process.env.RESEND_FROM_EMAIL;
+  if (!apiKey || !from) {
+    return { error: "Email system is not connected yet." };
+  }
+
+  const partyLine =
+    args.kids > 0
+      ? `${args.adults} adult${args.adults === 1 ? "" : "s"} and ${args.kids} child${args.kids === 1 ? "" : "ren"}`
+      : `${args.adults} adult${args.adults === 1 ? "" : "s"}`;
+
+  const html = `
+    <p>Hi ${escapeHtmlForEmail(args.name)},</p>
+    <p>Your Atlantic Coast Tours booking is confirmed!</p>
+    <ul>
+      <li><strong>Booking reference:</strong> ${escapeHtmlForEmail(args.booking_reference)}</li>
+      <li><strong>Tour:</strong> ${escapeHtmlForEmail(args.tour_name)}</li>
+      <li><strong>Party:</strong> ${escapeHtmlForEmail(partyLine)}</li>
+      <li><strong>Total:</strong> €${args.total_price}</li>
+    </ul>
+    <p>See you on the coast!<br/>Atlantic Coast Tours</p>
+  `;
+
+  try {
+    const res = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        from,
+        to: args.email,
+        subject: `Booking confirmed — ${args.tour_name} (${args.booking_reference})`,
+        html,
+      }),
+    });
+    if (!res.ok) {
+      console.error("Resend send failed:", await res.text());
+      return { error: "Failed to send the confirmation email." };
+    }
+    return { success: true };
+  } catch (err) {
+    console.error("Email send failed:", err);
+    return { error: "Failed to send the confirmation email." };
+  }
+}
+
+function escapeHtmlForEmail(str: string): string {
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
 // Google periodically retires/renames free-tier model ids and rate-limits are
 // per-model, so probe a shortlist and stick with whichever one actually works
 // for this key, rather than hardcoding a single name that can break later.
@@ -467,6 +564,16 @@ async function executeFunctionCall(name: string, args: Record<string, unknown>) 
       });
     case "show_tour_cards":
       return { ok: true };
+    case "send_confirmation_email":
+      return sendConfirmationEmail({
+        name: String(args.name ?? ""),
+        email: String(args.email ?? ""),
+        tour_name: String(args.tour_name ?? ""),
+        adults: Number(args.adults ?? 0),
+        kids: Number(args.kids ?? 0),
+        total_price: Number(args.total_price ?? 0),
+        booking_reference: String(args.booking_reference ?? ""),
+      });
     default:
       return { error: `Unknown function: ${name}` };
   }
