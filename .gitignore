@@ -40,6 +40,9 @@ yarn-error.log*
 # course materials (not for public repo)
 /instructions
 
+# service account key files — never commit credentials
+/keys
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts
