@@ -306,6 +306,7 @@
   }
   .chat-header .title { font-weight: 700; font-size: .95rem; }
   .chat-header .subtitle { font-size: .75rem; opacity: .85; }
+  .chat-header-actions { display: flex; align-items: center; gap: 2px; }
   .chat-header button {
     background: transparent;
     border: none;
@@ -314,6 +315,38 @@
     cursor: pointer;
     line-height: 1;
     padding: 4px;
+  }
+  .info-btn {
+    position: relative;
+    font-size: 1rem;
+    border-radius: 50%;
+  }
+  .info-tooltip {
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    width: 230px;
+    background: var(--text);
+    color: var(--bg);
+    font-size: .72rem;
+    font-weight: 400;
+    line-height: 1.4;
+    text-align: left;
+    padding: 10px 12px;
+    border-radius: 8px;
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(-4px);
+    transition: opacity .15s ease, transform .15s ease;
+    z-index: 20;
+    pointer-events: none;
+  }
+  .info-btn:hover .info-tooltip,
+  .info-btn:focus-visible .info-tooltip,
+  .info-btn.open .info-tooltip {
+    opacity: 1;
+    visibility: visible;
+    transform: none;
   }
 
   .chat-disclosure {
@@ -644,7 +677,21 @@
       <div class="title">Atlantic Coast Tours Assistant</div>
       <div class="subtitle">Live tours &amp; weather, answered instantly</div>
     </div>
-    <button onclick="toggleChat()" aria-label="Close chat">✕</button>
+    <div class="chat-header-actions">
+      <button
+        type="button"
+        class="info-btn"
+        id="chat-info-btn"
+        aria-label="About this assistant"
+        onclick="this.classList.toggle('open')"
+      >
+        ⓘ
+        <span class="info-tooltip" role="tooltip">
+          You are chatting with an AI assistant (a large language model), not a human. It looks up live tour and weather data to answer your questions, but responses are AI-generated and should be verified for anything you plan to rely on when booking.
+        </span>
+      </button>
+      <button onclick="toggleChat()" aria-label="Close chat">✕</button>
+    </div>
   </div>
   <div class="chat-disclosure">
     AI-generated responses using live tour and weather data — please verify before booking.
@@ -688,6 +735,13 @@
       bubbleIconEl.textContent = "💬";
     }
   }
+
+  document.addEventListener("click", (e) => {
+    const infoBtn = document.getElementById("chat-info-btn");
+    if (infoBtn && infoBtn.classList.contains("open") && !infoBtn.contains(e.target)) {
+      infoBtn.classList.remove("open");
+    }
+  });
 
   const WEATHER_ICONS = {
     0: ["☀️", "Clear sky"],
