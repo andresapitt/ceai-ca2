@@ -516,12 +516,10 @@ function escapeHtmlForEmail(str: string): string {
 // per-model, so probe a shortlist and stick with whichever one actually works
 // for this key, rather than hardcoding a single name that can break later.
 const MODEL_CANDIDATES = [
+  "gemini-3.6-flash",
   "gemini-flash-latest",
-  "gemini-2.5-flash",
-  "gemini-2.0-flash",
+  "gemini-3.5-flash-lite",
   "gemini-flash-lite-latest",
-  "gemini-2.5-flash-lite",
-  "gemini-2.0-flash-lite",
 ];
 let cachedWorkingModel: string | null = null;
 
