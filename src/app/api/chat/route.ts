@@ -456,9 +456,9 @@ type ConfirmationEmailArgs = {
 };
 
 async function sendConfirmationEmail(args: ConfirmationEmailArgs) {
-  const apiKey = process.env.RESEND_API_KEY;
-  const from = process.env.RESEND_FROM_EMAIL;
-  if (!apiKey || !from) {
+  const apiKey = process.env.SENDGRID_API_KEY;
+  const fromEmail = process.env.SENDGRID_FROM_EMAIL;
+  if (!apiKey || !fromEmail) {
     return { error: "Email system is not connected yet." };
   }
 
@@ -480,21 +480,21 @@ async function sendConfirmationEmail(args: ConfirmationEmailArgs) {
   `;
 
   try {
-    const res = await fetch("https://api.resend.com/emails", {
+    const res = await fetch("https://api.sendgrid.com/v3/mail/send", {
       method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        from,
-        to: args.email,
+        personalizations: [{ to: [{ email: args.email }] }],
+        from: { email: fromEmail, name: "Atlantic Coast Tours" },
         subject: `Booking confirmed — ${args.tour_name} (${args.booking_reference})`,
-        html,
+        content: [{ type: "text/html", value: html }],
       }),
     });
     if (!res.ok) {
-      console.error("Resend send failed:", await res.text());
+      console.error(`SendGrid send failed (status ${res.status}):`, await res.text());
       return { error: "Failed to send the confirmation email." };
     }
     return { success: true };
